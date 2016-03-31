@@ -1,5 +1,16 @@
 #include <3ds.h>
 
+
+char regionids_table[7][4] = {//http://3dbrew.org/wiki/Nandrw/sys/SecureInfo_A
+"JPN",
+"USA",
+"EUR",
+"JPN", //"AUS"
+"CHN",
+"KOR",
+"TWN"
+};
+
 // Code from examples/3ds/http/source/main.c
 Result http_download(httpcContext *context, u8* out, u32* bytes_downloaded)
 {
@@ -14,14 +25,14 @@ Result http_download(httpcContext *context, u8* out, u32* bytes_downloaded)
 
     printf("Retrieving status code...\n");
 	ret = httpcGetResponseStatusCode(&context, &statuscode, 0);
-	// if(ret!=0)return ret;
+	if(R_FAILED(ret))return ret;
 
     printf("Retreived status code ...\n");
 	if(statuscode!=200)return statuscode;
 
     printf("Preparing to download data...\n");
 	ret=httpcGetDownloadSizeState(context, NULL, &contentsize);
-	if(ret!=0)return ret;
+	if(R_FAILED(ret))return ret;
 
 	gfxFlushBuffers();
 
@@ -44,7 +55,7 @@ int main(int argc, char** argv)
     aptInit();
     httpcInit(0);
 
-    printf("Ready to install notihax! Press A to install, press any other key to exit.\n");
+    printf("Ready to install notihax! Press A to install, press any other key to exit.\n\n");
 
     while(aptMainLoop())
     {
@@ -60,23 +71,66 @@ int main(int argc, char** argv)
         }
     }
 
-    u8 n3ds;
-    APT_CheckNew3DS(&n3ds);
+	Result ret = 0;
+	u8 region=0;
+	u8 new3dsflag = 0;
 
-    u32 kver = osGetKernelVersion();
-    printf("kver:      %08x\n", kver);
-    printf("sysverraw: %1u %2u %2u\n", GET_VERSION_MAJOR(kver), GET_VERSION_MINOR(kver), GET_VERSION_REVISION(kver));
+	OS_VersionBin nver_versionbin;
+	OS_VersionBin cver_versionbin;
 
-	OS_VersionBin version;
-	osGetSystemVersionData(&version, NULL);
+	u32 payloadsize = 0, payloadsize_aligned = 0;
+	u32 payload_src = 0;
 
-    char payload_loc[84];
-    sprintf(payload_loc, "https://raw.githubusercontent.com/TechNick6425/notihax/master/payloads/%s%08x%s.bin", (n3ds != 0 ? "n" : "o"), kver, version.region);
+	char payload_sysver[32];
+	char payloadurl[0x80];
+	char payload_sdpath[0x80];
+
+	memset(&nver_versionbin, 0, sizeof(OS_VersionBin));
+	memset(&cver_versionbin, 0, sizeof(OS_VersionBin));
+
+	memset(payload_sysver, 0, sizeof(payload_sysver));
+	memset(payloadurl, 0, sizeof(payloadurl));
+	memset(payload_sdpath, 0, sizeof(payload_sdpath));
+
+	printf("Getting system-version/system-info etc...\n");
+
+	ret = cfguInit();
+	if(ret!=0)
+	{
+		printf("Failed to init cfgu: 0x%08x.\n", (unsigned int)ret);
+		return ret;
+	}
+	ret = CFGU_SecureInfoGetRegion(&region);
+	if(ret!=0)
+	{
+		printf("Failed to get region from cfgu: 0x%08x.\n", (unsigned int)ret);
+		return ret;
+	}
+	if(region>=7)
+	{
+		printf("Region value from cfgu is invalid: 0x%02x.\n", (unsigned int)region);
+		ret = -9;
+		return ret;
+	}
+	cfguExit();
+
+	APT_CheckNew3DS(&new3dsflag);
+
+	ret = osGetSystemVersionData(&nver_versionbin, &cver_versionbin);
+	if(ret!=0)
+	{
+		printf("Failed to load the system-version: 0x%08x.\n", (unsigned int)ret);
+		return ret;
+	}
+
+	snprintf(payload_sysver, sizeof(payload_sysver)-1, "%s-%d-%d-%d-%d-%s", new3dsflag?"NEW":"OLD", cver_versionbin.mainver, cver_versionbin.minor, cver_versionbin.build, nver_versionbin.mainver, regionids_table[region]);
+	snprintf(payloadurl, sizeof(payloadurl)-1, "http://smea.mtheall.com/get_payload.php?version=%s", payload_sysver);
+	snprintf(payload_sdpath, sizeof(payload_sdpath)-1, "sdmc:/hblauncherloader_otherapp_payload_%s.bin", payload_sysver);
 
     printf("\nDownloading payload...\n");
 
     httpcContext context;
-    httpcOpenContext(&context, HTTPC_METHOD_GET, payload_loc, 1);
+    httpcOpenContext(&context, HTTPC_METHOD_GET, payloadurl, 1);
 
     u32 bytes;
     u8* buffer;
@@ -86,7 +140,7 @@ int main(int argc, char** argv)
     case 0:
         break;
     default:
-        printf("%u: %s", i, payload_loc);
+        printf("%u: %s", i, payloadurl);
         return i;
     }
 
